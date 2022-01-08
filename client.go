@@ -3,6 +3,7 @@ package wireless
 import (
 	"errors"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +119,7 @@ func (cl *Client) Networks() (nets Networks, err error) {
 }
 
 // Connect to a new or existing network
+// Deprecated
 func (cl *Client) Connect(net Network) (Network, error) {
 	net, err := cl.AddOrUpdateNetwork(net)
 	if err != nil {
@@ -147,18 +149,89 @@ func (cl *Client) Connect(net Network) (Network, error) {
 	return net, errors.New("failed to catch event " + ev.Name)
 }
 
-// AddOrUpdateNetwork will add or, if the network has IDStr set, update it
-func (cl *Client) AddOrUpdateNetwork(net Network) (Network, error) {
-	if net.IDStr != "" {
-		nets, err := cl.Networks()
-		if err != nil {
-			return net, err
+// ConnectAndPrioritize will connect to a new or existing network and set its priority to 1, and all other networks to 0
+func (cl *Client) ConnectAndPrioritize(net Network) (Network, error) {
+	net, err := cl.AddOrUpdateNetwork(net)
+
+	if err != nil {
+		return net, err
+	}
+
+	status, err := cl.Status()
+	if err != nil {
+		return net, err
+	}
+
+	sub := cl.Subscribe(
+		EventNetworkNotFound,
+		EventAuthReject,
+		EventConnected,
+		EventDisconnected,
+		EventAssocReject,
+	)
+
+	if err := cl.SelectNetwork(net.ID); err != nil {
+		return net, err
+	}
+
+	if err = cl.Reassociate(); err != nil {
+		return net, err
+	}
+
+	for {
+		ev := <-sub.Next()
+
+		if ev.Name == EventConnected {
+			cl.EnableAllNetworksAndResetPriority()
+			cl.SetNetworkPriority(net.ID, 1)
+			return net, cl.SaveConfig()
+		}
+		if ev.Name == EventDisconnected {
+			// when switching networks, we expect the current network to first disconnect
+			bssId, ok := ev.Arguments["bssid"]
+			if ok && status.BSSID == bssId {
+				continue
+			}
 		}
 
-		for _, n := range nets {
-			if n.IDStr == net.IDStr {
-				return cl.UpdateNetwork(net)
-			}
+		// undo any changes we've made to the wpa_supplicant state
+		// without attempting to connect to something else
+
+		// TODO: if this *updated* a network and failed, and then a
+		// successful connection is made to a different network, the
+		// previous (successful) configuration for the initial network
+		// would be removed.
+		err = cl.RemoveNetwork(net.ID)
+		if err != nil {
+			cl.Conn().log.Println("Error removing network", err)
+		}
+
+		switch ev.Name {
+		case EventNetworkNotFound:
+			return net, ErrSSIDNotFound
+		case EventAuthReject:
+			return net, ErrAuthFailed
+		case EventDisconnected:
+			return net, ErrDisconnected
+		case EventAssocReject:
+			return net, ErrAssocRejected
+		}
+
+		return net, errors.New("failed to catch event " + ev.Name)
+	}
+}
+
+// AddOrUpdateNetwork will add a network or, if the network is already present, update it
+func (cl *Client) AddOrUpdateNetwork(net Network) (Network, error) {
+	nets, err := cl.Networks()
+	if err != nil {
+		return net, err
+	}
+
+	for _, n := range nets {
+		if n.SSID == net.SSID {
+			net.ID = n.ID
+			return cl.UpdateNetwork(net)
 		}
 	}
 
@@ -204,6 +277,25 @@ func (cl *Client) AddNetwork(net Network) (Network, error) {
 	return net, nil
 }
 
+// enable all networks and reset all network priorities
+func (cl *Client) EnableAllNetworksAndResetPriority() error {
+	nets, err := cl.Networks()
+	if err != nil {
+		return err
+	}
+	for _, net := range nets {
+		err = cl.SetNetworkPriority(net.ID, 0)
+		if err != nil {
+			return err
+		}
+		err = cl.EnableNetwork(net.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RemoveNetwork will RemoveNetwork
 func (cl *Client) RemoveNetwork(id int) error {
 	return cl.conn.SendCommandBool(CmdRemoveNetwork, strconv.Itoa(id))
@@ -219,13 +311,28 @@ func (cl *Client) DisableNetwork(id int) error {
 	return cl.conn.SendCommandBool(CmdDisableNetwork + " " + strconv.Itoa(id))
 }
 
-// SaveConfig will SaveConfig
+// SetNetworkPriority sets the priority of the given network id to the given amount
+func (cl *Client) SetNetworkPriority(id int, priority int) error {
+	return cl.conn.SendCommandBool(setCmdJoin(id, "priority", strconv.Itoa(priority)))
+}
+
+// RelectNetwork will select specific network
+func (cl *Client) SelectNetwork(id int) error {
+	return cl.conn.SendCommandBool(CmdSelectNetwork + " " + strconv.Itoa(id))
+}
+
+// Reassociate will force a network reassociation
+func (cl *Client) Reassociate() error {
+	return cl.conn.SendCommandBool(CmdReassociate)
+}
+
+// SaveConfig will save the current wpa_supplicant network configuration to the on-disk configuration file
 func (cl *Client) SaveConfig() error {
 	return cl.conn.SendCommandBool(CmdSaveConfig)
 }
 
-// LoadConfig will LoadConfig
-func (cl *Client) LoadConfig() error {
+// Reconfigure will reconfigure wpa_supplicant with the on-disk configuration file
+func (cl *Client) Reconfigure() error {
 	return cl.conn.SendCommandBool(CmdReconfigure)
 }
 
@@ -237,4 +344,19 @@ func (cl *Client) GetNetworkAttr(id int, attr string) (string, error) {
 	}
 
 	return strings.TrimSpace(s), nil
+}
+
+// Print to std out all wireless events
+func (cl *Client) Debug() {
+	cl.Conn().WithLogOutput(log.Writer())
+	go func() {
+		sub := cl.Subscribe("")
+		var (
+			msg Event
+		)
+		for {
+			msg = <-sub.Next()
+			cl.Conn().log.Println("wpa_supplicant Event:", msg)
+		}
+	}()
 }
