@@ -1,6 +1,9 @@
 package wireless
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // This file contains components from github.com/brlbil/wpaclient
 //
@@ -56,6 +59,7 @@ type Network struct {
 
 	ID       int      `json:"id"`
 	IDStr    string   `json:"id_str"`
+	Mode     int      `json:"mode"`
 	KeyMgmt  string   `json:"key_mgmt"`
 	SSID     string   `json:"ssid"`
 	BSSID    string   `json:"bssid"`
@@ -196,6 +200,7 @@ func (net Network) Attributes(sep, indent string) []string {
 	lines := []string{}
 
 	lines = append(lines, indent+"ssid"+sep+configWriteString(net.SSID))
+	lines = append(lines, indent+"mode"+sep+strconv.FormatInt(int64(net.Mode), 10))
 	switch {
 	case net.Known && net.PSK != "":
 		lines = append(lines, indent+"psk"+sep+configWriteString(net.PSK))

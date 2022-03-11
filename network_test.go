@@ -6,10 +6,10 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-var pskNet = Network{ID: 0, IDStr: "h", SSID: "gg", PSK: "xx"}
-var pskNet2 = Network{ID: 0, IDStr: "h", SSID: "gg", PSK: "xx", KeyMgmt: "WPA2-TKIP", ScanSSID: true}
-var knwonPSKNet = Network{Known: true, ID: 0, IDStr: "h", SSID: "gg", KeyMgmt: "WPA2-TKIP", ScanSSID: true}
-var openNet = Network{ID: 0, IDStr: "x", SSID: "gg"}
+var pskNet = Network{ID: 0, IDStr: "h", Mode: 0, SSID: "gg", PSK: "xx"}
+var pskNet2 = Network{ID: 0, IDStr: "h", Mode: 0, SSID: "gg", PSK: "xx", KeyMgmt: "WPA2-TKIP", ScanSSID: true}
+var knwonPSKNet = Network{Known: true, ID: 0, IDStr: "h", Mode: 0, SSID: "gg", KeyMgmt: "WPA2-TKIP", ScanSSID: true}
+var openNet = Network{ID: 0, IDStr: "x", Mode: 0, SSID: "gg"}
 
 // func TestNetwork(t *testing.T) {
 // 	Convey("given a blank network", t, func() {
@@ -24,6 +24,7 @@ func TestSetCmds(t *testing.T) {
 			cmds := setCmds(n)
 
 			Convey("then it should have the basic fields", func() {
+				So(cmds, ShouldContain, `SET_NETWORK 0 mode 0`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 psk "xx"`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 ssid "gg"`)
 			})
@@ -39,6 +40,7 @@ func TestSetCmds(t *testing.T) {
 			Println(cmds)
 
 			Convey("then it should have the basic fields", func() {
+				So(cmds, ShouldContain, `SET_NETWORK 0 mode 0`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 psk "xx"`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 ssid "gg"`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 key_mgmt WPA2-TKIP`)
@@ -56,7 +58,8 @@ func TestSetCmds(t *testing.T) {
 			Println(cmds)
 
 			Convey("then it should not contain the PSK", func() {
-				So(len(cmds), ShouldEqual, 3)
+				So(len(cmds), ShouldEqual, 4)
+				So(cmds, ShouldContain, `SET_NETWORK 0 mode 0`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 ssid "gg"`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 key_mgmt WPA2-TKIP`)
 				So(cmds, ShouldContain, `SET_NETWORK 0 scan_ssid 1`)
@@ -71,7 +74,8 @@ func TestSetCmds(t *testing.T) {
 				Println(cmds)
 
 				Convey("then it should not contain the PSK", func() {
-					So(len(cmds), ShouldEqual, 4)
+					So(len(cmds), ShouldEqual, 5)
+					So(cmds, ShouldContain, `SET_NETWORK 0 mode 0`)
 					So(cmds, ShouldContain, `SET_NETWORK 0 psk "horsewaffle"`)
 					So(cmds, ShouldContain, `SET_NETWORK 0 ssid "gg"`)
 					So(cmds, ShouldContain, `SET_NETWORK 0 key_mgmt WPA2-TKIP`)
